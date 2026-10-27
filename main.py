@@ -5,6 +5,7 @@ import html
 import json
 import os
 import re
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -317,7 +318,13 @@ IMAGE_QUALITY = 88
 # the picture that came back are both written to this folder, and one block of console
 # says what the model was asked, what it said about its own answer, how long it took and
 # how much of the picture it changed. See `picture_report`.
-PICTURE_DIR = "translated_pictures"
+#
+# It is the name of a folder beside `main.py`, or an absolute path from `.env`, or empty
+# for that name -- and it is only the first place tried. A hosted runner unpacks the app
+# read-only (Vercel serves the files from `/var/task` and writes only under `/tmp`), so the
+# same folder is also tried under the temp directory, and a host where neither works still
+# runs the step with the console block as its record. `picture_folder` does the choosing.
+PICTURE_DIR = (os.getenv("PICTURE_DIR") or "").strip() or "translated_pictures"
 
 # The extension for each type `image_mime` can report: what is kept on disk is opened by
 # name rather than sniffed, unlike the bytes going out to the model and to the panel.
@@ -841,6 +848,54 @@ def picture_changed(before_content, picture):
     return 100 * changed / (before.size[0] * before.size[1])
 
 
+# The folder `picture_folder` settled on, and whether it has looked yet: the answer does not
+# change inside one process, and looking costs a directory and a throwaway file.
+_PICTURE_FOLDER = None
+_PICTURE_FOLDER_LOOKED = False
+
+
+def picture_folder():
+    """A folder the picture step's two files can be written to, or `None` if there is none.
+
+    `PICTURE_DIR` beside `main.py` is where this was written and what the README promises,
+    and on a machine that runs the app from a checkout it is the answer. A hosted runner
+    does not run it from a checkout: Vercel serves the files from a read-only `/var/task`,
+    where `mkdir` fails with `[Errno 30] Read-only file system`, and `/tmp` is the one place
+    a function may write. So the candidates are the configured path (alone, when it is
+    absolute, because that is an instruction rather than a name), then the same name beside
+    the app, then the same name under `tempfile.gettempdir()` -- and each one has to accept
+    a real file before it is trusted, because a mount can report itself writable and refuse
+    the write, and a `mkdir(exist_ok=True)` on an existing read-only folder succeeds.
+
+    `None` is not a failure of the picture step: the console block is the account of what
+    the model answered, and the two files are only how that answer can be looked at again.
+    See `picture_report`.
+    """
+    global _PICTURE_FOLDER, _PICTURE_FOLDER_LOOKED
+    if _PICTURE_FOLDER_LOOKED:
+        return _PICTURE_FOLDER
+    _PICTURE_FOLDER_LOOKED = True
+    wanted = Path(PICTURE_DIR)
+    candidates = (
+        [wanted]
+        if wanted.is_absolute()
+        else [
+            Path(__file__).resolve().parent / wanted,
+            Path(tempfile.gettempdir()) / wanted,
+        ]
+    )
+    for folder in candidates:
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(dir=folder, prefix=".mm-", delete=True):
+                pass
+        except OSError:
+            continue
+        _PICTURE_FOLDER = folder
+        break
+    return _PICTURE_FOLDER
+
+
 def picture_report(stem, language, source, picture, said, seconds):
     """The picture that came back kept on disk, and one block of console about it.
 
@@ -848,17 +903,26 @@ def picture_report(stem, language, source, picture, said, seconds):
     the picture it was given, or with the same picture at a larger size and the Chinese
     still on it, is a 200 with an image in it, and the lightbox cannot tell that from a
     translation. The panel is left to show the picture; this leaves the two pictures side
-    by side in `PICTURE_DIR` and the account of the answer in the console, so "it came
+    by side in `picture_folder()` and the account of the answer in the console, so "it came
     back untranslated" can be looked at and measured rather than argued about -- the
     percentage below a few per cent being an answer that is not an edit of the wording.
+
+    Nothing here may fail the step, which is why the writing is wrapped rather than
+    assumed: a host that writes nowhere, or a disk that is full, costs the two files and
+    leaves the console block saying so, while the picture itself still goes to the panel.
     """
-    folder = Path(__file__).resolve().parent / PICTURE_DIR
-    folder.mkdir(exist_ok=True)
+    folder = picture_folder()
     slug = re.sub(r"[^a-z0-9]+", "-", language.lower()).strip("-") or "target"
-    kept = []
+    kept, lost = [], "this host has nowhere to write"
     for kind, content in (("source", source), ("translated", picture)):
+        if folder is None:
+            break
         path = folder / f"{stem}-{slug}-{kind}{PICTURE_SUFFIX[image_mime(content)]}"
-        path.write_bytes(content)
+        try:
+            path.write_bytes(content)
+        except OSError as error:
+            lost = str(error)
+            break
         kept.append(path)
     changed = picture_changed(source, picture)
     changed = (
@@ -866,13 +930,19 @@ def picture_report(stem, language, source, picture, said, seconds):
         if changed is None
         else f"{changed:.1f}% of the picture differs from the one that went out"
     )
+    if len(kept) == 2:
+        where = f"kept: {kept[0].name} and {kept[1].name} in {folder}"
+    elif kept:
+        where = f"kept: only {kept[0].name}, not the other one -- {lost}"
+    else:
+        where = f"kept: nothing -- {lost}"
     print(
         f"picture: {PICTURE_MODEL} answered in {seconds:.1f}s with {len(picture):,} bytes "
         f"of {image_mime(picture)} at {picture_shape(picture)}, for {len(source):,} bytes "
         f"at {picture_shape(source)} of {stem}\n"
         f"  {changed}\n"
         f"  model said: {said or '(no text came back with the picture)'}\n"
-        f"  kept: {kept[0].name} and {kept[1].name} in {folder}",
+        f"  {where}",
         flush=True,
     )
 
@@ -1254,8 +1324,8 @@ def image_translated(url, language):
     comes back is that picture: nothing was read off it line by line here, so `read` is
     empty and the panel says the picture was returned rather than listing lines. Both
     pictures -- the one that went out and the one that came back -- are kept in
-    `PICTURE_DIR`, and a block of console says what the model returned, what it said about
-    its own answer, how long the call took and how much of the picture it changed: the
+    `picture_folder()`, and a block of console says what the model returned, what it said
+    about its own answer, how long the call took and how much of the picture it changed: the
     wording it was given is `IMAGE_TRANSLATE_PROMPT`, and the answer beside it in the
     console is what that wording produced. See `picture_report`.
 
@@ -1270,9 +1340,15 @@ def image_translated(url, language):
     """
     content = download_image(url)
     if PICTURE_KEY:
+        kept = picture_folder()
+        where = (
+            f"is kept in {kept} and reported below"
+            if kept is not None
+            else "is reported below, this host having nowhere to keep it"
+        )
         print(
             f"picture: sending {url} to {PICTURE_MODEL} for {language} -- what comes back "
-            f"is kept in {PICTURE_DIR} and reported below",
+            f"{where}",
             flush=True,
         )
         return {
@@ -2563,14 +2639,20 @@ def detail_wording_html(result, url):
     below says how many of each there are.
     """
     if result.get("model") == PICTURE_MODEL:
+        kept = picture_folder()
+        where = (
+            f"kept in {html.escape(str(kept))}"
+            if kept is not None
+            else "not kept on disk, this host having nowhere to write"
+        )
         return (
             f'<div style="{DETAIL_NOTE_STYLE}">{html.escape(PICTURE_MODEL)} returned this '
             "picture with its Chinese wording translated: the layout, the product "
             "graphics, the arrows, the numbers and the background on it are the model's "
             "own edit of the picture Momoshop published, and nothing was drawn over it "
-            f"here. The picture that went out and this one are both kept in "
-            f"{html.escape(PICTURE_DIR)}, and the console says how long the call took and "
-            "how much of the picture it changed.</div>"
+            f"here. The picture that went out and this one are both {where}, and the "
+            "console says how long the call took and how much of the picture it changed."
+            "</div>"
             f'<div style="{LIGHTBOX_BAR_STYLE}">'
             f'<button class="mm-btn" style="{BUTTON_STYLE}" '
             f'data-mm-image="{html.escape(url, quote=True)}">show the original picture'

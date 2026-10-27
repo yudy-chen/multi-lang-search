@@ -20,7 +20,8 @@ endpoint (ROCm), the picture step from Gemma. Gradio, Python 3.12.
 - **The wording in the photos.** Click a picture, then `translate the wording into
   Indonesian`. With a `GEMINI_KEY` an image model edits the picture in place; without
   one, Gemma reads the wording off it and Pillow letters the translation back on. Those
-  pictures land in `translated_pictures/`.
+  pictures land in `translated_pictures/` beside the app -- or under the temp directory
+  where the app's own folder is read-only, as on Vercel.
 
 ## Quick start
 
@@ -112,6 +113,8 @@ picture read in 9-76s and lettered in 4-11s.
 | A card or a line stays Chinese after the retries | The console counts it; the panel's retry button asks again for exactly those lines. A second search is the blunt fix. |
 | `ModuleNotFoundError: gradio` | The venv is not active, or `pip install` ran against another interpreter. |
 | A runner refuses with `PYTHON_ENTRYPOINT_NOT_FOUND` | It imports `main.py` and wants a top-level ASGI app. `app` and `application` are exported at the bottom of the file; `uvicorn main:app` is that app. |
+| `picture failed: [Errno 30] Read-only file system: '/var/task/translated_pictures'` | A hosted runner unpacked the app read-only. Fixed: the step now keeps its two pictures in the temp directory instead (`PICTURE_DIR` overrides where), and a host with nowhere to write costs the files and not the picture. |
+| The picture step answers `504` / `FUNCTION_INVOCATION_TIMEOUT` on Vercel | The function's ceiling, not the app's: an image model takes 10-80s for one picture, and Vercel Hobby stops a function at 60s. Raise `maxDuration` in `vercel.json` (Pro allows 300s), or run the app on `python main.py` / a container host. |
 
 ## Files
 
@@ -124,6 +127,7 @@ picture read in 9-76s and lettered in 4-11s.
 | `_panel_check.py` | Offline check of the panel's frames -- `python _panel_check.py`, no network. |
 | `_endpoint_check.py` | Is the token in `.env` answering, and which models does that endpoint list. |
 | `_env_check.py` | The endpoint switch without a provider: a fake endpoint on a local port, every path called against it (its fixture is `_mock_provider.py`). |
+| `_folder_check.py` | Where the picture step writes, and that a read-only app folder (Vercel's `/var/task`) costs the two files and not the picture -- `python _folder_check.py`, no network. |
 | `_model_check.py` | What the image model does with the app's own request body. |
 | `_picture_dbg.py` | One picture through the picture step, with the shape of the reply. |
 

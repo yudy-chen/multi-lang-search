@@ -522,6 +522,16 @@ every pixel a little without changing anything on the picture. It is the one thi
 the answer that can be checked without looking at it: a few per cent is the wording
 replaced, and nothing at all is an answer that is not an edit.
 
+Where that folder is, is not decided by the table above: `PICTURE_DIR` beside `main.py` if
+it accepts a file, otherwise the same name under the temp directory, otherwise nowhere. The
+second is the one a deployment meets -- Vercel serves the app from a read-only `/var/task`,
+where `mkdir` answers `[Errno 30] Read-only file system`, and `/tmp` is the only writable
+place a function has -- and the third is what a host that writes nowhere gets: the console
+block with `kept: nothing -- <the error>`, and the picture still in the overlay, because
+the two files are only how an answer can be looked at again while the block is the account
+of it. `PICTURE_DIR` in `.env` takes an absolute path for files that should outlive the
+process, and `_folder_check.py` walks all three cases without a key.
+
 There is a better picture to ask about, and it is not the one on a card. Every picture the
 search payload carries is a 320x320 `_OL.jpg` -- the collage above included -- and
 stripping `_OL` off that URL is a `404`, so the card's picture has no bigger sibling. The
