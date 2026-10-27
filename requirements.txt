@@ -29,9 +29,10 @@ fastapi==0.143.0
 openai==3.29.0
 requests==2.34.2
 
-# `.env` is read at import for `AMD_AI_TOKEN` and `GEMINI_KEY`; a process without the
-# second one still runs, it just re-letters pictures here instead (see `IMAGE_MODEL`).
-# Copy `.env.example` to `.env` and fill the two values in.
+# `.env` is read at import for `AI_BASE_URL`, `AI_API_KEY` (or the older `AMD_AI_TOKEN`)
+# and `GEMINI_KEY`; a process without the last one still runs, it just re-letters
+# pictures here instead (see `IMAGE_MODEL`). Copy `.env.example` to `.env` and fill in
+# the values for the endpoint you are using.
 python-dotenv==1.2.4
 
 # Only the picture step without a `GEMINI_KEY` needs this: the wording is read off the

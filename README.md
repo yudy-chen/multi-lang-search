@@ -24,8 +24,8 @@ endpoint (ROCm), the picture step from Gemma. Gradio, Python 3.12.
 
 ## Quick start
 
-From `multi-lang-search/`, with Python 3.12 and network access to Momoshop and the Radeon
-endpoint:
+From `multi-lang-search/`, with Python 3.12 and network access to Momoshop and whichever
+chat endpoint `.env` names (the Radeon one by default):
 
 ```bash
 python -m venv venv
@@ -48,6 +48,29 @@ the picture step uses it. Open the URL Gradio prints -- usually http://127.0.0.1
 imports it and serves the top-level ASGI `app` exported at the bottom, so
 `uvicorn main:app --port 7860` serves exactly the same app (`application` is the same
 object, for runners that look for that name).
+
+## Any other endpoint
+
+Every chat model goes through one OpenAI-compatible client, so the endpoint is
+configuration, not code: fill these in `.env` and no line of `main.py` moves. Unset
+means the Radeon endpoint the numbers in [NOTES.md](NOTES.md) were measured on.
+
+| where | `AI_BASE_URL` | key | `QUERY_MODEL` / `RESULT_MODEL` |
+| --- | --- | --- | --- |
+| Radeon (default) | *(unset)* | `AMD_AI_TOKEN` | the defaults, `DeepSeek-V4-Flash` / `Gemma-4-31B-IT` |
+| DeepSeek | `https://api.deepseek.com` | `AI_API_KEY` | `deepseek-flash` for both |
+| Gemini, free tier | `https://generativelanguage.googleapis.com/v1beta/openai/` | `AI_API_KEY`, and `GEMINI_KEY` for the picture step | a flash name from `GET .../openai/models` |
+| OpenRouter | `https://openrouter.ai/api/v1` | `AI_API_KEY` | a `:free` text model id |
+| Ollama, on this machine | `http://localhost:11434/v1` | any non-empty string | the model you pulled |
+
+`DETAIL_MODEL` follows `QUERY_MODEL` unless it is set too. One caveat: DeepSeek's API
+takes text only, so without a `GEMINI_KEY` nothing there can read a picture -- that step
+then says it could not, rather than guessing. Set `IMAGE_MODEL` to a vision model on the
+same endpoint, or keep the Gemini key (which also covers text, if the endpoint is
+Gemini's). `python _endpoint_check.py` asks whichever endpoint `.env` names, one request
+per model, and prints what came back. `python _env_check.py` asks the same question
+offline: it stands a fake endpoint up on a local port, points `main.py` at it and calls
+every path, so a switch can be checked without spending a key.
 
 ## Test it in two minutes
 
@@ -94,12 +117,13 @@ picture read in 9-76s and lettered in 4-11s.
 
 | | |
 | --- | --- |
-| `main.py` | The app: search, cards, detail panel, picture step -- and, at the bottom, the ASGI `app` / `application` a hosted runner serves instead of running the file. Models, timeouts and concurrency are constants at the top, not config. |
+| `main.py` | The app: search, cards, detail panel, picture step -- and, at the bottom, the ASGI `app` / `application` a hosted runner serves instead of running the file. Models, the endpoint, timeouts and concurrency are constants at the top; the endpoint, its key and the model names can be overridden in `.env`. |
 | `requirements.txt` | The six packages, pinned to what it ran on. |
-| `.env.example` | The two keys with what they are for. Copy to `.env`; `.env` itself is git-ignored. |
+| `.env.example` | The endpoint, its key and the model names, with what each one is for. Copy to `.env`; `.env` itself is git-ignored. |
 | `NOTES.md` | The long version: every measurement, the endpoint's behaviour, and why the design is what it is. |
 | `_panel_check.py` | Offline check of the panel's frames -- `python _panel_check.py`, no network. |
-| `_endpoint_check.py` | Is the Radeon token answering, and which models does it list. |
+| `_endpoint_check.py` | Is the token in `.env` answering, and which models does that endpoint list. |
+| `_env_check.py` | The endpoint switch without a provider: a fake endpoint on a local port, every path called against it (its fixture is `_mock_provider.py`). |
 | `_model_check.py` | What the image model does with the app's own request body. |
 | `_picture_dbg.py` | One picture through the picture step, with the shape of the reply. |
 

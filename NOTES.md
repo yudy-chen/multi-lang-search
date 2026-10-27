@@ -23,7 +23,56 @@ way in: the file ends with `app = gr.mount_gradio_app(FastAPI(), demo, path="/")
 ASGI app gets the same Gradio app at the same routes -- `uvicorn main:app` is that
 runner. Building it at import binds no port; `python main.py` still goes through
 `demo.launch()` and ignores the export. Which model answers
-what is a constant at the top of `main.py`, not a package.
+what is a constant at the top of `main.py`, not a package -- or a value in `.env`, when
+the endpoint is not the one those constants name (below).
+
+## Changing the endpoint
+
+The Radeon token expires, and the app was written so that this is configuration rather
+than a rewrite. `AI_BASE_URL`, `AI_API_KEY` and the four model names are read from
+`.env` once at import; unset is the Radeon endpoint and the names it serves, so a `.env`
+that only carries the old `AMD_AI_TOKEN` behaves exactly as it did, and a runner that
+sets nothing still gets the app every number in this file was measured on.
+`AI_API_KEY` is read first and `AMD_AI_TOKEN` second, so the older name keeps working.
+
+What travels: `complete()` is the only place a chat request is built, and it sends
+`model` and `messages` and nothing else -- no `response_format`, no `temperature`, no
+`extra_body`, no streaming. That is why another provider is a base URL and not a port:
+every provider-specific knob the app does not use is a knob it cannot be rejected for.
+The rate-limit path is the same shape: a `429` in the error string sets `RATE_LIMITED`,
+and the waits around it (`TRANSLATE_RATE_LIMIT_WAIT`, `DETAIL_RETRY_WAIT`) are the
+one behaviour every provider does report the same way.
+
+What does not travel: the picture step. `PICTURE_MODEL` is Google's own REST --
+`x-goog-api-key`, `generateContent`, `responseModalities` -- on `GEMINI_KEY`, because
+the Radeon endpoint serves no model that returns a picture (see below). And the fallback
+for a process with no picture key, `IMAGE_MODEL` reading the wording off the picture,
+needs a model that accepts a picture, which is the one thing another chat endpoint does
+not promise. DeepSeek is the example that matters here: its API is text only now
+(`-vision-exp` is retired and its requests are served by a text model), so with
+`AI_BASE_URL` pointed there and no `GEMINI_KEY` the lightbox says the picture could not
+be read -- `image_translated` raises rather than letting an empty `complete()` pass as
+"no wording on this picture". A free path that covers text and vision with one key is
+Gemini's OpenAI-compatible layer (`https://generativelanguage.googleapis.com/v1beta/openai/`,
+a flash model from `GET /v1beta/openai/models`), which is also the key the picture step
+already wants; OpenRouter's `:free` models and a local Ollama cover the text half only,
+unless a vision model is named as `IMAGE_MODEL`.
+
+Every number in this file is the Radeon endpoint's, which is why the app is shaped the
+way it is: one listing per request, a timeout per request, a query model that answers in
+seconds, three translation workers. None of that shape is wrong on a faster endpoint --
+`TRANSLATE_WORKERS = 3` and the retry waits become conservative rather than necessary --
+but none of the timings transfer either, and the first thing worth re-running after a
+switch is `python _endpoint_check.py`, which reads the same four names and asks whichever
+endpoint `.env` now names.
+
+`_env_check.py` is the seam without a provider in it: it starts `_mock_provider.py` on a
+local port, points `main.py` at it and calls the query, the cards, the panel and the
+picture read, then prints the requests the fake endpoint received. What that measures is
+that the four names and the key arrive where they are meant to -- `AI_BASE_URL` on every
+call, `DETAIL_MODEL` on the panel, `IMAGE_MODEL` on the picture -- including the branch
+where a text-only endpoint answers the picture read with a 400 and the lightbox says so
+instead of the app raising. It spends no token, which is why it was worth writing.
 
 ## How the results stay translated
 
@@ -539,4 +588,3 @@ on, so a search that also writes the panel would otherwise put a second
 before; the hover and focus cue that the old `<a href>` gave for free now comes from
 the results component's `css_template`. `PAGE_TIMEOUT` (30s) covers every page this
 app fetches.
-

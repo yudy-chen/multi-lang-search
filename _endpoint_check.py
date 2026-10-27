@@ -1,9 +1,13 @@
 """Scratch: is the endpoint answering at all, and which key is the app holding?
 
 Run this when the panel stays Chinese and the console says a model was rate limited. It
-answers the two questions that decide what to do next, and nothing else: whether the Radeon
-token is being refused right now (a 429 for every model, or for one) and whether the key the
+answers the two questions that decide what to do next, and nothing else: whether the token
+is being refused right now (a 429 for every model, or for one) and whether the key the
 app holds is the key that works elsewhere.
+
+It reads the same four names `main.py` reads -- `AI_BASE_URL`, `AI_API_KEY` (or the older
+`AMD_AI_TOKEN`), `QUERY_MODEL`, `RESULT_MODEL` -- and falls back to the Radeon defaults, so
+it follows the app to another endpoint rather than asking the one it has left.
 
 One tiny request per model, because a rate limit is a property of the token and the moment:
 `DeepSeek-V4-Flash` answering `ok` here means the panel's Chinese was a moment that has
@@ -23,8 +27,15 @@ from openai import OpenAI
 HERE = Path(__file__).resolve().parent
 load_dotenv(HERE / ".env")
 
-BASE = "https://developer.amd.com.cn/radeon/api/v1"
-ASKED = ["DeepSeek-V4-Flash", "MiMo-V2.6-Flash"]
+BASE = (os.getenv("AI_BASE_URL") or "").strip() or "https://developer.amd.com.cn/radeon/api/v1"
+ASKED = list(
+    dict.fromkeys(
+        (
+            (os.getenv("QUERY_MODEL") or "").strip() or "DeepSeek-V4-Flash",
+            (os.getenv("RESULT_MODEL") or "").strip() or "Gemma-4-31B-IT",
+        )
+    )
+)
 
 
 def masked(secret):
@@ -49,9 +60,9 @@ if script.exists():
         print(f"{script.name}:", masked(literal.group(1)), flush=True)
         print("same key:", app_key == literal.group(1), flush=True)
 
-token = os.getenv("AMD_AI_TOKEN", "").strip()
-print("\n--- the Radeon token ---", flush=True)
-print("AMD_AI_TOKEN:", masked(token), flush=True)
+token = (os.getenv("AI_API_KEY") or os.getenv("AMD_AI_TOKEN") or "").strip()
+print(f"\n--- the token for {BASE} ---", flush=True)
+print("AI_API_KEY / AMD_AI_TOKEN:", masked(token), flush=True)
 try:
     listing = requests.get(
         f"{BASE}/models",

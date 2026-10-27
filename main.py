@@ -24,29 +24,49 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 
 momo_search = "https://www.momoshop.com.tw/search/"
 
-# The endpoint every model here is served from.
-AI_BASE_URL = "https://developer.amd.com.cn/radeon/api/v1"
+# The endpoint this was built on; what an empty `AI_BASE_URL` means.
+_DEFAULT_AI_BASE_URL = "https://developer.amd.com.cn/radeon/api/v1"
+
+# The endpoint every chat model here is served from. Any server that speaks
+# `/chat/completions` will do -- the Radeon endpoint this was built and measured on,
+# DeepSeek (`https://api.deepseek.com`), Gemini's OpenAI-compatible layer
+# (`https://generativelanguage.googleapis.com/v1beta/openai/`), OpenRouter
+# (`https://openrouter.ai/api/v1`), a local Ollama (`http://localhost:11434/v1`). It is
+# read from `.env` so the app can outlive one provider's token; an empty or missing
+# value is the Radeon endpoint, so a `.env` that only carries the old token behaves
+# exactly as it did before this was movable.
+AI_BASE_URL = (os.getenv("AI_BASE_URL") or "").strip() or _DEFAULT_AI_BASE_URL
+
+# The key for `AI_BASE_URL`. `AI_API_KEY` is the name that fits any endpoint;
+# `AMD_AI_TOKEN` is what the Radeon console calls it and is read second, so the older
+# `.env` keeps working unchanged.
+AI_API_KEY = (os.getenv("AI_API_KEY") or os.getenv("AMD_AI_TOKEN") or "").strip()
 
 # For these source languages the query is translated to Traditional Chinese
 # before it is sent to the Momoshop search endpoint.
 TRANSLATE_TO_TRADITIONAL_CHINESE = {"English", "Indonesia"}
 TARGET_LANGUAGE = "Traditional Chinese"
 
-# Chat models on the Radeon endpoint, one per job: the search query is a single
-# short string that the user waits on with an empty page, while the results are a
-# whole page of listings translated one request at a time as they arrive. Both are
-# served from the same token, so neither is a spare for the other: they share the
-# token's rate limit and get throttled together.
-QUERY_MODEL = "DeepSeek-V4-Flash"
+# Chat models, one per job: the search query is a single short string that the user
+# waits on with an empty page, while the results are a whole page of listings
+# translated one request at a time as they arrive. Both are served from the same token,
+# so neither is a spare for the other: they share the token's rate limit and get
+# throttled together -- which is why changing the provider changes all of them at once.
+#
+# The defaults below are the names the Radeon endpoint serves, and the names every
+# number in NOTES.md was measured on. Another endpoint serves other names, so all four
+# are read from `.env` as well; an empty or missing value is the default.
+QUERY_MODEL = (os.getenv("QUERY_MODEL") or "").strip() or "DeepSeek-V4-Flash"
 
-RESULT_MODEL = "Gemma-4-31B-IT"
+RESULT_MODEL = (os.getenv("RESULT_MODEL") or "").strip() or "Gemma-4-31B-IT"
 
 # The detail panel is translated with the query model rather than the result model:
 # its text is a handful of blocks and the user is sitting on a click, so it wants the
 # model that answers in seconds -- one listing measured 4.3s and 11.3s on this model
 # against 38.8s on `RESULT_MODEL`, and 2.9s against 51.1s when `RESULT_MODEL` was
-# `MiMo-V2.6-Flash`, which is the span the split was drawn across.
-DETAIL_MODEL = QUERY_MODEL
+# `MiMo-V2.6-Flash`, which is the span the split was drawn across. Unset, it follows
+# whatever `QUERY_MODEL` was set to.
+DETAIL_MODEL = (os.getenv("DETAIL_MODEL") or "").strip() or QUERY_MODEL
 
 # "The same picture with the wording changed" is one request to an image model: the
 # picture goes out beside a prompt, and the picture with its Chinese wording translated
@@ -82,14 +102,21 @@ PICTURE_MODEL = "gemini-3.1-flash-image-preview"
 PICTURE_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 PICTURE_KEY = os.getenv("GEMINI_KEY", "").strip()
 
-# Gemma can be shown a picture, which is the half of that job the Radeon endpoint can
-# do, and it is what the picture step becomes without a `GEMINI_KEY`: it takes a
+# Gemma can be shown a picture, which is the half of that job a chat endpoint can do,
+# and it is what the picture step becomes without a `GEMINI_KEY`: it takes a
 # picture as *input*, so it can read the Chinese wording off one and where each line
 # sits, but it answers in text, so the translation is lettered back onto the same
-# picture with Pillow afterwards. It is not the only model there that takes a picture
-# (`DeepSeek-V4-Flash-Vision-Exp` and the two `MiniCPM-V` names do too), but it is the
-# one this step was measured on. See `reletter_image`.
-IMAGE_MODEL = "Gemma-4-31B-IT"
+# picture with Pillow afterwards. It is not the only model the Radeon endpoint lists that
+# takes a picture (`DeepSeek-V4-Flash-Vision-Exp` and the two `MiniCPM-V` names do too),
+# but it is the one this step was measured on. See `reletter_image`.
+#
+# This one has to name a model that accepts a picture, and that is the single thing
+# another endpoint does not promise: DeepSeek's API takes text only (its `-vision-exp`
+# name is retired and served by a text model), so pointing `AI_BASE_URL` there leaves
+# this step with a model that refuses the request. It says so in the lightbox and does
+# not guess -- and it is a reason to set `IMAGE_MODEL` to a vision model on the same
+# endpoint, or to keep a `GEMINI_KEY`, when the chat endpoint moves.
+IMAGE_MODEL = (os.getenv("IMAGE_MODEL") or "").strip() or "Gemma-4-31B-IT"
 
 # A picture is a much bigger request than a listing is (the one measured was 366 KB
 # of base64 to read), so picture requests get a ceiling of their own, whether they go to
@@ -375,7 +402,7 @@ DETAIL_RETRY_WAIT = 3.0
 
 
 def complete(prompt, model=QUERY_MODEL, timeout=REQUEST_TIMEOUT):
-    """Send one user message to the Radeon AI endpoint and return the reply.
+    """Send one user message to the endpoint `AI_BASE_URL` names and return the reply.
 
     `prompt` is either the text of the message or the parts of a multimodal one
     (a text part plus a picture, which is how `IMAGE_MODEL` is asked to read a
@@ -384,7 +411,7 @@ def complete(prompt, model=QUERY_MODEL, timeout=REQUEST_TIMEOUT):
     """
     client = OpenAI(
         base_url=AI_BASE_URL,
-        api_key=os.getenv("AMD_AI_TOKEN"),
+        api_key=AI_API_KEY,
         timeout=timeout,
         max_retries=0,
     )
@@ -1232,10 +1259,12 @@ def image_translated(url, language):
     wording it was given is `IMAGE_TRANSLATE_PROMPT`, and the answer beside it in the
     console is what that wording produced. See `picture_report`.
 
-    Without a key for that model, the Radeon endpoint's Gemma is what is left, and that
-    is the smaller half of the job: it reads the wording off the picture and where each
-    line of it is, the same model translates those lines, and `reletter_image` letters
-    them back into the same picture. What comes back either way is everything the panel
+    Without a key for that model, `IMAGE_MODEL` on the chat endpoint is what is left --
+    Gemma, on the default endpoint -- and that is the smaller half of the job: it reads
+    the wording off the picture and where each line of it is, the same model translates
+    those lines, and `reletter_image` letters them back into the same picture. It has to
+    be a model that accepts a picture, which is not something every chat endpoint
+    serves. What comes back either way is everything the panel
     needs to say what happened -- the lines read, their translation, and the picture --
     whether or not anything could be drawn on it, and `model` says which of the two ran.
     """
