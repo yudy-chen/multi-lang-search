@@ -1,0 +1,39 @@
+# Everything the app imports from outside the standard library, pinned to the versions
+# it was run on (Python 3.12). The check scripts (`_panel_check.py`, `_model_check.py`,
+# `_endpoint_check.py`, `_picture_dbg.py`) need nothing beyond this list.
+#
+#   python -m venv venv
+#   venv\Scripts\activate          # Windows; `source venv/bin/activate` elsewhere
+#   pip install -r requirements.txt
+#   python main.py
+#
+# The models themselves are not packages: they are asked for by name at
+# `AI_BASE_URL` in `main.py`, over a key in `.env` (see `.env.example`).
+
+# `gr.Blocks`, `gr.HTML` with `css_template` / `js_on_load`, `gr.Progress` and the
+# generator events the search and the panel stream their frames with. Pinned to the
+# release this was run on: the search wiring passes `show_progress_on=results_box`
+# (main.py), which is what keeps the progress animation on the cards instead of
+# drawing a second copy over the panel.
+gradio==6.30.0
+
+# `main.py` imports `FastAPI` by name for the ASGI export at the bottom of the file
+# (`app = gr.mount_gradio_app(...)`), which is what a hosted runner serves when it
+# imports the module instead of running `python main.py`. Gradio installs it anyway;
+# pinned here because `main.py` imports it directly.
+fastapi==0.143.0
+
+# The chat models, through one OpenAI-compatible endpoint (`complete`): the query, the
+# result cards and the detail panel. `requests` is the plain HTTP the same file needs
+# for the Momoshop search page, and for the pictures the panel downloads.
+openai==3.29.0
+requests==2.34.2
+
+# `.env` is read at import for `AMD_AI_TOKEN` and `GEMINI_KEY`; a process without the
+# second one still runs, it just re-letters pictures here instead (see `IMAGE_MODEL`).
+# Copy `.env.example` to `.env` and fill the two values in.
+python-dotenv==1.2.4
+
+# Only the picture step without a `GEMINI_KEY` needs this: the wording is read off the
+# picture as text and lettered back onto the same picture (`reletter_image`).
+pillow==12.3.0
