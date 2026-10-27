@@ -3176,7 +3176,7 @@ with gr.Blocks(title="Multilanguage Momoshop Search") as demo:
         )
         language_box = gr.Radio(
             choices=["English", "Indonesia", "Chinese"],
-            label="Language",
+            label="Output Language",
             value="English",
             scale=1,
         )
